@@ -8,7 +8,7 @@ services:
     volumes:
       - ./input:/data/input
       - ./output:/data/output
-      - ./config:/config
+      - ./config:/app/configs
       - /mnt/srv2/eeg_dependencies/autoclean_pipeline/:/autoclean_pipeline
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
     environment:
@@ -27,7 +27,7 @@ services:
       - "--task"
       - "MouseXdatAssr"
       - "--config"
-      - "/config/autoclean_config.yaml"
+      - "/app/configs/autoclean_config.yaml"
       - "--output"
       - "/data/output"
       - "--work_dir"
