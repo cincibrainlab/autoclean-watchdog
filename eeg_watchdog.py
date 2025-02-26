@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 file_queue = queue.Queue()
 
 class EEGFileHandler(FileSystemEventHandler):
-    def __init__(self, extensions, script_path, task, config_path, output_dir):
+    def __init__(self, extensions, script_path, task, config_path, output_dir, work_dir):
         """
         Initialize the EEG file handler.
         
@@ -42,12 +42,14 @@ class EEGFileHandler(FileSystemEventHandler):
             task (str): EEG processing task type (RestingEyesOpen, ASSR, ChirpDefault, etc.)
             config_path (str): Path to configuration YAML file
             output_dir (str): Output directory for processed files
+            work_dir (str): Working directory for the autoclean pipeline
         """
         self.extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in extensions]
         self.script_path = script_path
         self.task = task
         self.config_path = config_path
         self.output_dir = output_dir
+        self.work_dir = work_dir
         
         # Ensure the output directory exists
         if not os.path.exists(self.output_dir):
@@ -69,7 +71,8 @@ class EEGFileHandler(FileSystemEventHandler):
                     'script_path': self.script_path,
                     'task': self.task,
                     'config_path': self.config_path,
-                    'output_dir': self.output_dir
+                    'output_dir': self.output_dir,
+                    'work_dir': self.work_dir
                 })
 
 
@@ -88,6 +91,7 @@ def process_file(params):
     task = params['task']
     config_path = params['config_path']
     output_dir = params['output_dir']
+    work_dir = params['work_dir']
     
     try:
         # Make sure the script is executable
@@ -101,7 +105,8 @@ def process_file(params):
             "-DataPath", file_path,
             "-Task", task,
             "-ConfigPath", config_path,
-            "-OutputPath", output_dir
+            "-OutputPath", output_dir,
+            "-WorkDir", work_dir
         ]
         
         logger.info(f"Processing file: {file_path}")
@@ -165,7 +170,8 @@ def main():
     parser.add_argument('--task', '-t', required=True, help='EEG processing task type (RestingEyesOpen, ASSR, ChirpDefault, etc.)')
     parser.add_argument('--config', '-c', required=True, help='Path to configuration YAML file')
     parser.add_argument('--output', '-o', required=True, help='Output directory for processed files')
-    parser.add_argument('--max-workers', '-w', type=int, default=3, help='Maximum number of concurrent processing tasks (default: 3)')
+    parser.add_argument('--work_dir', '-w', required=True, help='Working directory for the autoclean pipeline')
+    parser.add_argument('--max-workers', type=int, default=3, help='Maximum number of concurrent processing tasks (default: 3)')
     
     args = parser.parse_args()
     
@@ -190,6 +196,7 @@ def main():
     logger.info(f"Task: {args.task}")
     logger.info(f"Config: {args.config}")
     logger.info(f"Output directory: {args.output}")
+    logger.info(f"Working directory: {args.work_dir}")
     logger.info(f"Maximum concurrent processes: {args.max_workers}")
     
     # Start the worker thread for processing files
@@ -197,7 +204,7 @@ def main():
     worker.start()
     
     # Initialize the event handler and observer
-    event_handler = EEGFileHandler(args.extensions, args.script, args.task, args.config, args.output)
+    event_handler = EEGFileHandler(args.extensions, args.script, args.task, args.config, args.output, args.work_dir)
     observer = Observer()
     observer.schedule(event_handler, args.dir, recursive=True)
     observer.start()
@@ -215,7 +222,8 @@ def main():
                         'script_path': args.script,
                         'task': args.task,
                         'config_path': args.config,
-                        'output_dir': args.output
+                        'output_dir': args.output,
+                        'work_dir': args.work_dir
                     })
         
         # Keep the main thread alive

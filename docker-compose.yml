@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  eeg-watchdog:
+  eeg-watchdog-aud-assr:
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +9,7 @@ services:
       - ./input:/data/input
       - ./output:/data/output
       - ./config:/config
+      - /mnt/srv2/eeg_dependencies/autoclean_pipeline/:/autoclean_pipeline
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
     environment:
       - TZ=UTC
@@ -24,11 +25,13 @@ services:
       - "--script"
       - "/app/autoclean_wrapper.sh"
       - "--task"
-      - "RestingEyesOpen"
+      - "MouseXdatAssr"
       - "--config"
       - "/config/autoclean_config.yaml"
       - "--output"
       - "/data/output"
+      - "--work_dir"
+      - "/autoclean_pipeline"
       - "--max-workers"
       - "3"  # Set the maximum number of concurrent processes
     restart: unless-stopped
