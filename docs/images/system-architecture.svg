@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
+  <!-- Background -->
+  <rect width="1000" height="600" fill="#f8f9fa" />
+
+  <!-- Title -->
+  <text x="500" y="40" font-family="Arial, sans-serif" font-size="24" text-anchor="middle" font-weight="bold">EEG Data Processing Watchdog - System Architecture</text>
+
+  <!-- Host System Box -->
+  <rect x="50" y="80" width="900" height="480" rx="10" fill="#e9ecef" stroke="#6c757d" stroke-width="2" />
+  <text x="100" y="110" font-family="Arial, sans-serif" font-size="18" fill="#212529">Host System</text>
+
+  <!-- Docker Container Box -->
+  <rect x="100" y="130" width="800" height="380" rx="10" fill="#ffffff" stroke="#0366d6" stroke-width="2" stroke-dasharray="5,5" />
+  <text x="150" y="160" font-family="Arial, sans-serif" font-size="16" fill="#0366d6">Docker Environment</text>
+
+  <!-- EEG Watchdog Container -->
+  <rect x="150" y="180" width="700" height="280" rx="8" fill="#dff0d8" stroke="#28a745" stroke-width="2" />
+  <text x="300" y="210" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#28a745">EEG Watchdog Container</text>
+
+  <!-- Watchdog Script Component -->
+  <rect x="180" y="230" width="260" height="100" rx="5" fill="#ffffff" stroke="#28a745" stroke-width="1" />
+  <text x="310" y="260" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">EEG Watchdog Script</text>
+  <text x="310" y="280" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">File Monitoring</text>
+  <text x="310" y="300" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">ThreadPool Management</text>
+  <text x="310" y="320" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Queue Processing</text>
+
+  <!-- Autoclean Wrapper Component -->
+  <rect x="560" y="230" width="260" height="100" rx="5" fill="#ffffff" stroke="#28a745" stroke-width="1" />
+  <text x="690" y="260" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">Autoclean Wrapper</text>
+  <text x="690" y="280" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Parameter Handling</text>
+  <text x="690" y="300" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Docker Execution</text>
+  <text x="690" y="320" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Lock File Management</text>
+
+  <!-- Autoclean Container -->
+  <rect x="300" y="350" width="400" height="80" rx="5" fill="#d1ecf1" stroke="#17a2b8" stroke-width="1" />
+  <text x="500" y="380" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">Autoclean Container</text>
+  <text x="500" y="400" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">EEG Data Processing Pipeline</text>
+  
+  <!-- Connection Lines -->
+  <!-- Watchdog to Wrapper -->
+  <path d="M 440 280 L 560 280" stroke="#6c757d" stroke-width="2" stroke-dasharray="5,3" />
+  <!-- Arrow tip -->
+  <polygon points="550,276 560,280 550,284" fill="#6c757d" />
+  
+  <!-- Wrapper to Autoclean -->
+  <path d="M 690 330 L 690 350" stroke="#6c757d" stroke-width="2" stroke-dasharray="5,3" />
+  <!-- Arrow tip -->
+  <polygon points="686,340 690,350 694,340" fill="#6c757d" />
+  
+  <!-- Directory Mounting -->
+  <!-- Input Directory -->
+  <rect x="100" y="480" width="180" height="60" rx="5" fill="#fff3cd" stroke="#ffc107" stroke-width="1" />
+  <text x="190" y="510" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">Input Directory</text>
+  <text x="190" y="530" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">/data/input</text>
+  
+  <!-- Config Directory -->
+  <rect x="310" y="480" width="180" height="60" rx="5" fill="#f8d7da" stroke="#dc3545" stroke-width="1" />
+  <text x="400" y="510" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">Config Directory</text>
+  <text x="400" y="530" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">/config</text>
+  
+  <!-- Output Directory -->
+  <rect x="520" y="480" width="180" height="60" rx="5" fill="#cce5ff" stroke="#007bff" stroke-width="1" />
+  <text x="610" y="510" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">Output Directory</text>
+  <text x="610" y="530" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">/data/output</text>
+  
+  <!-- Docker Socket -->
+  <rect x="730" y="480" width="180" height="60" rx="5" fill="#e2e3e5" stroke="#6c757d" stroke-width="1" />
+  <text x="820" y="510" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold">Docker Socket</text>
+  <text x="820" y="530" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">/var/run/docker.sock</text>
+  
+  <!-- Directory Connection Lines -->
+  <path d="M 190 480 L 190 420 L 230 420" stroke="#ffc107" stroke-width="2" />
+  <path d="M 400 480 L 400 450 L 450 450" stroke="#dc3545" stroke-width="2" />
+  <path d="M 610 480 L 610 420 L 560 420" stroke="#007bff" stroke-width="2" />
+  <path d="M 820 480 L 820 420 L 760 420" stroke="#6c757d" stroke-width="2" />
+  
+  <!-- CLI Components -->
+  <rect x="780" y="110" width="150" height="40" rx="5" fill="#ffffff" stroke="#6c757d" stroke-width="1" />
+  <text x="855" y="135" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">PowerShell/Bash Scripts</text>
+  
+  <!-- Legend -->
+  <rect x="100" y="550" width="800" height="40" rx="5" fill="#ffffff" stroke="#6c757d" stroke-width="1" />
+  <circle cx="130" cy="570" r="6" fill="#dff0d8" stroke="#28a745" stroke-width="1" />
+  <text x="145" y="574" font-family="Arial, sans-serif" font-size="12">Watchdog</text>
+  
+  <circle cx="230" cy="570" r="6" fill="#d1ecf1" stroke="#17a2b8" stroke-width="1" />
+  <text x="245" y="574" font-family="Arial, sans-serif" font-size="12">Autoclean</text>
+  
+  <circle cx="330" cy="570" r="6" fill="#fff3cd" stroke="#ffc107" stroke-width="1" />
+  <text x="345" y="574" font-family="Arial, sans-serif" font-size="12">Input</text>
+  
+  <circle cx="420" cy="570" r="6" fill="#f8d7da" stroke="#dc3545" stroke-width="1" />
+  <text x="435" y="574" font-family="Arial, sans-serif" font-size="12">Config</text>
+  
+  <circle cx="510" cy="570" r="6" fill="#cce5ff" stroke="#007bff" stroke-width="1" />
+  <text x="525" y="574" font-family="Arial, sans-serif" font-size="12">Output</text>
+  
+  <line x1="580" y1="570" x2="610" y2="570" stroke="#6c757d" stroke-width="2" stroke-dasharray="5,3" />
+  <text x="625" y="574" font-family="Arial, sans-serif" font-size="12">Data Flow</text>
+  
+  <line x1="670" y1="570" x2="700" y2="570" stroke="#6c757d" stroke-width="2" />
+  <text x="715" y="574" font-family="Arial, sans-serif" font-size="12">Volume Mounting</text>
+</svg>

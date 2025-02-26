@@ -1,0 +1,19 @@
+# Sample autoclean configuration
+# Replace this with your actual configuration
+
+processing:
+  task: RestingEyesOpen
+  parameters:
+    threshold: 0.75
+    filter:
+      lowcut: 1
+      highcut: 40
+    artifacts:
+      remove: true
+      method: 'ICA'
+
+output:
+  format: 'EDF'
+  include_raw: false
+  include_filtered: true
+  include_report: true
