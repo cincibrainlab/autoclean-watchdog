@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 SUCCESS_TRACKER = "processed_files.csv"
 ERROR_TRACKER = "error_files.csv"
 
+# Host path environment variables
+HOST_INPUT_DIR = os.environ.get('INPUT_DIR', '')
+HOST_OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '')
+HOST_CONFIG_DIR = os.environ.get('CONFIG_DIR', '')
+HOST_AUTOCLEAN_DIR = os.environ.get('AUTOCLEAN_DIR', '')
+
 class EEGFileHandler(FileSystemEventHandler):
     def __init__(self, monitor_dir, extensions, script_path, task, config_path, output_dir, work_dir):
         """Initialize the EEG file handler with minimal parameters."""
@@ -151,34 +157,74 @@ class EEGFileHandler(FileSystemEventHandler):
                 subprocess.run(['chmod', '+x', self.script_path], check=True)
                 logger.info(f"Made script executable: {self.script_path}")
             
-            # Run the autoclean script
+            # Convert container paths to host paths if environment variables are available
+            host_file_path = file_path
+            host_config_path = self.config_path
+            host_output_path = self.output_dir
+            
+            # Convert input file path
+            if HOST_INPUT_DIR and file_path.startswith('/data/input/'):
+                rel_path = os.path.relpath(file_path, '/data/input')
+                host_file_path = os.path.join(HOST_INPUT_DIR, rel_path)
+                logger.info(f"Converted container input path {file_path} to host path {host_file_path}")
+            
+            # Convert config path
+            if HOST_CONFIG_DIR and self.config_path.startswith('/app/configs/'):
+                # Extract just the directory part, not the file
+                host_config_path = HOST_CONFIG_DIR
+                logger.info(f"Using host config directory: {host_config_path}")
+            
+            # Convert output path
+            if HOST_OUTPUT_DIR and self.output_dir.startswith('/data/output'):
+                host_output_path = HOST_OUTPUT_DIR
+                logger.info(f"Using host output path: {host_output_path}")
+
+            host_autoclean_path = HOST_AUTOCLEAN_DIR
+            
+            # Run the autoclean script with host paths
             command = [
                 self.script_path,
-                "-DataPath", file_path,
+                "-DataPath", host_file_path,
                 "-Task", self.task,
-                "-ConfigPath", self.config_path,
-                "-OutputPath", self.output_dir,
-                "-WorkDir", self.work_dir
+                "-ConfigPath", host_config_path,
+                "-OutputPath", host_output_path,
+                "-WorkDir", host_autoclean_path
             ]
             
             logger.info(f"Processing file: {file_path}")
-            logger.info(f"Command: {' '.join(command)}")
+            logger.info(f"Using host paths in command: {' '.join(command)}")
             
             # Pass along the original environment variables
+            # Don't use check=True so we can capture output even on failure
             result = subprocess.run(
                 command,
-                check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 env=os.environ
             )
             
+            # Log the output regardless of success/failure
+            if result.stdout:
+                logger.info(f"Script stdout: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"Script stderr: {result.stderr}")
+            
+            # Check return code after capturing output
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    result.returncode, 
+                    command, 
+                    output=result.stdout, 
+                    stderr=result.stderr
+                )
+            
             logger.info(f"EEG data processing completed successfully for: {file_path}")
             self._record_success(file_path)
             
         except subprocess.CalledProcessError as e:
             logger.error(f"Error processing file {file_path}: {e}")
+            logger.error(f"Script stdout: {e.output}")
             logger.error(f"Script stderr: {e.stderr}")
             self._record_error(file_path, str(e.stderr))
             
