@@ -38,7 +38,5 @@ services:
       - "/data/output"
       - "--work_dir"
       - "/autoclean_pipeline"
-      - "--max-workers"
-      - "${MAX_WORKERS:-3}"
     restart: unless-stopped
     privileged: true  # Required for Docker-in-Docker functionality
