@@ -72,9 +72,13 @@ class EEGFileHandler(FileSystemEventHandler):
         self.error_files = load_error_tracking()
         
         # Ensure the output directory exists
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-            logger.info(f"Created output directory: {self.output_dir}")
+        # Only create directories in the container if not using host paths
+        if not (HOST_INPUT_DIR and HOST_OUTPUT_DIR and HOST_CONFIG_DIR and HOST_AUTOCLEAN_DIR):
+            if not os.path.exists(self.output_dir):
+                os.makedirs(self.output_dir)
+                logger.info(f"Created output directory: {self.output_dir}")
+        else:
+            logger.info(f"Using host paths - skipping output directory creation in container")
     
     def on_created(self, event):
         """Handle file creation events."""
@@ -347,6 +351,11 @@ def process_file(params):
         env['HOST_CONFIG_DIR'] = HOST_CONFIG_DIR
         env['HOST_AUTOCLEAN_DIR'] = HOST_AUTOCLEAN_DIR
         env['HOST_FILE_PATH'] = host_file_path
+        
+        # Add a flag to indicate we're using host paths
+        if HOST_INPUT_DIR and HOST_OUTPUT_DIR and HOST_CONFIG_DIR and HOST_AUTOCLEAN_DIR:
+            env['USING_HOST_PATHS'] = 'true'
+            logger.info("Setting USING_HOST_PATHS=true to indicate we're using host paths")
         
         # Run the autoclean script with the appropriate parameters
         command = [

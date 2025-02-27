@@ -66,13 +66,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Create a unique output subdirectory for this processing job
-# This helps prevent file conflicts when multiple jobs run in parallel
-# The final structure will be:
-# OUTPUT_PATH/
-# └── TIMESTAMP_FILENAME_TASK/
-#     └── (processing results)
-
 # Get filename without extension and path
 FILE_BASE=$(basename "$DATA_PATH")
 FILE_NAME="${FILE_BASE%.*}"
@@ -83,21 +76,44 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 echo "DEBUG: Timestamp: $TIMESTAMP"
 
 JOB_DIR="${OUTPUT_PATH}/${TIMESTAMP}_${FILE_NAME}_${TASK}"
-echo "DEBUG: Creating job directory: $JOB_DIR"
-mkdir -p "$JOB_DIR"
-log_dir_created=true
+echo "DEBUG: Job directory path: $JOB_DIR"
+
+# Check if we're using host paths
+if [ -n "$USING_HOST_PATHS" ] || [ -n "$HOST_INPUT_DIR" ] && [ -n "$HOST_OUTPUT_DIR" ] && [ -n "$HOST_CONFIG_DIR" ] && [ -n "$HOST_AUTOCLEAN_DIR" ]; then
+    # When using host paths, we'll create directories on the host side, not in the container
+    log_dir_created=false
+    echo "DEBUG: Using host paths - skipping JOB_DIR creation in container"
+else
+    # Create the job directory in the container only if not using host paths
+    mkdir -p "$JOB_DIR"
+    log_dir_created=true
+    echo "DEBUG: Created job directory in container: $JOB_DIR"
+fi
 
 # Create a lockfile name for this specific file
 LOCK_FILE="/tmp/autoclean_$(echo "${DATA_PATH}" | md5sum | cut -d' ' -f1).lock"
 echo "DEBUG: Lock file path: $LOCK_FILE"
 
 # Create a log file
-LOG_FILE="${JOB_DIR}/process.log"
-echo "DEBUG: Log file path: $LOG_FILE"
+if [ "$log_dir_created" = "true" ]; then
+    # If we created the job directory in the container, use it for logs
+    LOG_FILE="${JOB_DIR}/process.log"
+    echo "DEBUG: Log file path (container): $LOG_FILE"
+else
+    # When using host paths, use a temporary log file in the container
+    LOG_FILE="/tmp/autoclean_$(echo "${DATA_PATH}" | md5sum | cut -d' ' -f1).log"
+    echo "DEBUG: Using temporary log file in container: $LOG_FILE"
+fi
 
 # Log function
 log() {
-    echo "$(date +'%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+    local message="$(date +'%Y-%m-%d %H:%M:%S') - $1"
+    echo "$message"
+    
+    # Only append to log file if it's accessible
+    if [ -n "$LOG_FILE" ] && { [ -f "$LOG_FILE" ] || touch "$LOG_FILE" 2>/dev/null; }; then
+        echo "$message" >> "$LOG_FILE"
+    fi
 }
 
 # Initial log entry to create the log file
@@ -137,8 +153,9 @@ if [ -n "$HOST_INPUT_DIR" ] && [ -n "$HOST_OUTPUT_DIR" ] && [ -n "$HOST_CONFIG_D
         log "Could not convert job directory to host path, using as is: $HOST_JOB_DIR"
     fi
     
-    # Ensure the host job directory exists
-    mkdir -p "$HOST_JOB_DIR"
+    # When using host paths, we don't need to create directories in the container
+    # The directories should already exist on the host or will be created there
+    log "Using host paths - skipping directory creation in container"
     
     # Instead of using the host path directly, use the container's mounted path
     # The autoclean.sh script should be in the mounted autoclean directory
@@ -236,31 +253,11 @@ fi
 if [ $EXIT_CODE -eq 0 ]; then
     log "Processing completed successfully"
     
-    # Only copy if JOB_DIR is different from OUTPUT_PATH
-    if [ "$JOB_DIR" != "$OUTPUT_PATH" ]; then
-        log "Copying results from job directory to main output directory"
-        echo "DEBUG: Running: cp -r \"$JOB_DIR\"/* \"$OUTPUT_PATH\"/"
-        cp -r "$JOB_DIR"/* "$OUTPUT_PATH"/ >> "$LOG_FILE" 2>&1
-        CP_EXIT_CODE=$?
-        echo "DEBUG: Copy exit code: $CP_EXIT_CODE"
-        
-        if [ $CP_EXIT_CODE -eq 0 ]; then
-            log "Results copied to main output directory: $OUTPUT_PATH"
-        else
-            log "Error copying results to main output directory (exit code: $CP_EXIT_CODE)"
-            echo "DEBUG: Contents of job directory:"
-            ls -la "$JOB_DIR"
-            echo "DEBUG: Contents of output directory:"
-            ls -la "$OUTPUT_PATH"
-        fi
-        
-        # Log the final directory structure
-        log "Final directory structure:"
-        log "- Job directory (contains processing results): $JOB_DIR"
-        log "- Main output directory (contains copied results): $OUTPUT_PATH"
-    else
-        log "Job directory is the same as output directory, no need to copy"
-    fi
+    # Log the final output location
+    log "Processing results are available in: $JOB_DIR"
+    
+    # No longer copying results to avoid duplication
+    log "NOTE: Results are only stored in the job directory to prevent duplication"
 else
     log "Error during processing (exit code: $EXIT_CODE)"
     echo "DEBUG: Error details from autoclean.sh:"
