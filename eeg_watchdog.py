@@ -39,6 +39,12 @@ file_queue = queue.Queue()
 SUCCESS_TRACKER = "processed_files.csv"
 ERROR_TRACKER = "error_files.csv"
 
+# Host path environment variables
+HOST_INPUT_DIR = os.environ.get('INPUT_DIR', '')
+HOST_OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '')
+HOST_CONFIG_DIR = os.environ.get('CONFIG_DIR', '')
+HOST_AUTOCLEAN_DIR = os.environ.get('AUTOCLEAN_DIR', '')
+
 class EEGFileHandler(FileSystemEventHandler):
     def __init__(self, extensions, script_path, task, config_path, output_dir, work_dir, max_retries):
         """
@@ -321,6 +327,27 @@ def process_file(params):
             subprocess.run(['chmod', '+x', script_path], check=True)
             logger.info(f"Made autoclean script executable: {script_path}")
         
+        # Convert container paths to host paths for Docker-in-Docker
+        # Get the relative path from the container's input directory
+        if HOST_INPUT_DIR and file_path.startswith('/data/input/'):
+            rel_path = os.path.relpath(file_path, '/data/input')
+            # Use os.path.join to handle path separators correctly for the OS
+            host_file_path = os.path.join(HOST_INPUT_DIR, rel_path)
+            # Normalize path to use forward slashes for consistency
+            host_file_path = host_file_path.replace('\\', '/')
+            logger.info(f"Converted container input path {file_path} to host path {host_file_path}")
+        else:
+            host_file_path = file_path
+            logger.warning(f"Could not convert input path {file_path} to host path, using as is")
+        
+        # Set up environment variables for the script
+        env = os.environ.copy()
+        env['HOST_INPUT_DIR'] = HOST_INPUT_DIR
+        env['HOST_OUTPUT_DIR'] = HOST_OUTPUT_DIR
+        env['HOST_CONFIG_DIR'] = HOST_CONFIG_DIR
+        env['HOST_AUTOCLEAN_DIR'] = HOST_AUTOCLEAN_DIR
+        env['HOST_FILE_PATH'] = host_file_path
+        
         # Run the autoclean script with the appropriate parameters
         command = [
             script_path,
@@ -332,6 +359,7 @@ def process_file(params):
         ]
         
         logger.info(f"Processing file: {file_path}")
+        logger.info(f"Host file path: {host_file_path}")
         logger.info(f"Command: {' '.join(command)}")
         
         result = subprocess.run(
@@ -339,7 +367,8 @@ def process_file(params):
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=env
         )
         
         logger.info(f"EEG data processing completed successfully for: {file_path}")
@@ -407,6 +436,12 @@ def main():
     parser.add_argument('--reset-tracking', action='store_true', help='Reset the tracking files and reprocess all files')
     
     args = parser.parse_args()
+    
+    # Log host path environment variables
+    logger.info(f"Host input directory: {HOST_INPUT_DIR}")
+    logger.info(f"Host output directory: {HOST_OUTPUT_DIR}")
+    logger.info(f"Host config directory: {HOST_CONFIG_DIR}")
+    logger.info(f"Host autoclean directory: {HOST_AUTOCLEAN_DIR}")
     
     # Set paths for tracking files (place them in the monitored directory)
     global SUCCESS_TRACKER, ERROR_TRACKER

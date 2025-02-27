@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     lsb-release \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker Compose v2
@@ -31,6 +32,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY eeg_watchdog.py .
 COPY autoclean_wrapper.sh .
 COPY autoclean_wrapper_test.sh .
+
+RUN dos2unix autoclean_wrapper.sh
+RUN dos2unix autoclean_wrapper_test.sh
+
 # Make the scripts executable
 RUN chmod +x autoclean_wrapper.sh
 RUN chmod +x autoclean_wrapper_test.sh

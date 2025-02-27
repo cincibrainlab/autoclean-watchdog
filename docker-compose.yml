@@ -14,7 +14,12 @@ services:
       - TZ=UTC
       - TASK_NAME=${TASK_NAME}  # Pass task name into container
       - MAX_WORKERS=${MAX_WORKERS:-3}  # Define here instead of command
-      - HOST_CONFIG_PATH=${CONFIG_DIR}
+      # Pass host paths for Docker-in-Docker
+      - INPUT_DIR=${INPUT_DIR}
+      - OUTPUT_DIR=${OUTPUT_DIR}
+      - CONFIG_DIR=${CONFIG_DIR}
+      - AUTOCLEAN_DIR=${AUTOCLEAN_DIR}
+      - AUTOCLEAN_IMAGE=${AUTOCLEAN_IMAGE:-autoclean:latest}  # Docker image name
     command: 
       - "--dir"
       - "/data/input"
