@@ -1,6 +1,6 @@
 services:
   eeg-watchdog:
-    container_name: eeg-watchdog-${TASK_NAME}  # Postfix with TASK_NAME
+    container_name: eeg-watchdog-${BOT_NAME}  # Postfix with TASK_NAME
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,6 +14,7 @@ services:
       - TZ=UTC
       - TASK_NAME=${TASK_NAME}  # Pass task name into container
       - MAX_WORKERS=${MAX_WORKERS:-3}  # Define here instead of command
+      - HOST_CONFIG_PATH=${CONFIG_DIR}
     command: 
       - "--dir"
       - "/data/input"
