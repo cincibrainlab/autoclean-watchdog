@@ -23,8 +23,6 @@ usage() {
 
 # Default output path
 OUTPUT_PATH="./output"
-# Default AutoClean repository path
-AUTOCLEAN_PATH="/mnt/srv2/eeg_dependencies/autoclean_pipeline/"
 
 echo "DEBUG: Script started with arguments: $@"
 
@@ -68,30 +66,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if all required parameters are provided
-if [ -z "$DATA_PATH" ] || [ -z "$TASK" ] || [ -z "$CONFIG_PATH" ]; then
-    echo "Error: Missing required parameters."
-    usage
-fi
-
-# Ensure the data path exists
-if [ ! -e "$DATA_PATH" ]; then
-    echo "Error: Data path does not exist: $DATA_PATH"
-    ls -la $(dirname "$DATA_PATH")
-    exit 1
-fi
-
-# Ensure the config file exists
-if [ ! -f "$CONFIG_PATH" ]; then
-    echo "Error: Configuration file does not exist: $CONFIG_PATH"
-    ls -la $(dirname "$CONFIG_PATH")
-    exit 1
-fi
-
-# Ensure the output directory exists
-mkdir -p "$OUTPUT_PATH"
-echo "DEBUG: Created output directory: $OUTPUT_PATH"
-ls -la "$OUTPUT_PATH"
+# Create a unique output subdirectory for this processing job
+# This helps prevent file conflicts when multiple jobs run in parallel
+# The final structure will be:
+# OUTPUT_PATH/
+# └── TIMESTAMP_FILENAME_TASK/
+#     └── (processing results)
 
 # Get filename without extension and path
 FILE_BASE=$(basename "$DATA_PATH")
@@ -102,12 +82,6 @@ echo "DEBUG: File base name: $FILE_BASE, File name without extension: $FILE_NAME
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 echo "DEBUG: Timestamp: $TIMESTAMP"
 
-# Create a unique output subdirectory for this processing job
-# This helps prevent file conflicts when multiple jobs run in parallel
-# The final structure will be:
-# OUTPUT_PATH/
-# └── TIMESTAMP_FILENAME_TASK/
-#     └── (processing results)
 JOB_DIR="${OUTPUT_PATH}/${TIMESTAMP}_${FILE_NAME}_${TASK}"
 echo "DEBUG: Creating job directory: $JOB_DIR"
 mkdir -p "$JOB_DIR"
@@ -129,12 +103,6 @@ log() {
 # Initial log entry to create the log file
 log "Starting autoclean wrapper script"
 
-# Try to acquire a lock for this file
-if [ -e "$LOCK_FILE" ]; then
-    log "Another process is already processing $DATA_PATH (lock file exists: $LOCK_FILE)"
-    exit 1
-fi
-
 # Create the lock file
 touch "$LOCK_FILE"
 echo "DEBUG: Created lock file: $LOCK_FILE"
@@ -154,21 +122,15 @@ log "Lock file: $LOCK_FILE"
 AUTOCLEAN_SCRIPT="${AUTOCLEAN_PATH}/autoclean.sh"
 echo "DEBUG: AutoClean script path: $AUTOCLEAN_SCRIPT"
 
-# Check if autoclean script exists and is executable
-if [ ! -f "$AUTOCLEAN_SCRIPT" ]; then
-    echo "ERROR: AutoClean script does not exist: $AUTOCLEAN_SCRIPT"
-    ls -la "$AUTOCLEAN_PATH"
-    exit 1
-fi
+# Extract config directory and filename
+CONFIG_DIR=$(dirname "$CONFIG_PATH")
+CONFIG_FILE=$(basename "$CONFIG_PATH")
+echo "DEBUG: Config directory: $CONFIG_DIR, Config filename: $CONFIG_FILE"
 
-if [ ! -x "$AUTOCLEAN_SCRIPT" ]; then
-    echo "DEBUG: AutoClean script is not executable, attempting to make it executable"
-    chmod +x "$AUTOCLEAN_SCRIPT"
-    if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to make AutoClean script executable"
-        exit 1
-    fi
-fi
+# Update CONFIG_PATH to only use the directory
+CONFIG_PATH="$CONFIG_DIR"
+echo "DEBUG: Updated CONFIG_PATH to directory only: $CONFIG_PATH"
+
 
 # Run autoclean.sh with the job directory as the output path
 # This ensures each processing job has its own isolated output directory

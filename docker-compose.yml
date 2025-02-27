@@ -1,18 +1,19 @@
-version: '3.8'
-
 services:
-  eeg-watchdog-aud-assr:
+  eeg-watchdog:
+    container_name: eeg-watchdog-${TASK_NAME}  # Postfix with TASK_NAME
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./input:/data/input
-      - ./output:/data/output
-      - ./config:/app/configs
-      - /mnt/srv2/eeg_dependencies/autoclean_pipeline/:/autoclean_pipeline
+      - ${INPUT_DIR}:/data/input
+      - ${OUTPUT_DIR}:/data/output
+      - ${CONFIG_DIR}:/app/configs
+      - ${AUTOCLEAN_DIR}:/autoclean_pipeline
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
     environment:
       - TZ=UTC
+      - TASK_NAME=${TASK_NAME}  # Pass task name into container
+      - MAX_WORKERS=${MAX_WORKERS:-3}  # Define here instead of command
     command: 
       - "--dir"
       - "/data/input"
@@ -25,7 +26,7 @@ services:
       - "--script"
       - "/app/autoclean_wrapper.sh"
       - "--task"
-      - "MouseXdatAssr"
+      - "${TASK_NAME}"
       - "--config"
       - "/app/configs/autoclean_config.yaml"
       - "--output"
@@ -33,6 +34,6 @@ services:
       - "--work_dir"
       - "/autoclean_pipeline"
       - "--max-workers"
-      - "3"  # Set the maximum number of concurrent processes
+      - "${MAX_WORKERS:-3}"
     restart: unless-stopped
     privileged: true  # Required for Docker-in-Docker functionality
