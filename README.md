@@ -158,7 +158,21 @@ The `eeg_watchdog.py` script accepts the following parameters:
 - `--task`, `-t`: EEG processing task type
 - `--config`, `-c`: Path to configuration YAML file
 - `--output`, `-o`: Output directory for processed files
-- `--max-workers`, `-w`: Maximum number of concurrent processing tasks (default: 3)
+- `--work_dir`, `-w`: Working directory for the autoclean pipeline
+- `--max-workers`: Maximum number of concurrent processing tasks (default: 3)
+- `--max-retries`: Maximum number of retries for error files (default: 3)
+- `--reset-tracking`: Reset the tracking files and reprocess all files
+
+#### File Tracking
+
+The watchdog script maintains two CSV tracking files to manage processed files:
+
+- `processed_files.csv`: Records successfully processed files with filename, timestamp, and filepath
+- `error_files.csv`: Tracks files that encountered errors during processing, including retry counts
+
+When a file is successfully processed, it's added to the success tracker and removed from the error tracker if present. Files that have already been successfully processed will be skipped when the watchdog restarts.
+
+If a file encounters an error during processing, it will be retried up to the number of times specified by `--max-retries`. After reaching the maximum retry count, the file will be skipped in future runs unless the `--reset-tracking` flag is used.
 
 ### Command-Line Tools
 
