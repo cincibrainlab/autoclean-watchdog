@@ -29,7 +29,7 @@ services:
       - "bdf"
       - "cnt"
       - "--script"
-      - "/app/autoclean_wrapper.sh"
+      - "/app/autoclean_wrapper_minimal.sh"
       - "--task"
       - "${TASK_NAME}"
       - "--config"

@@ -32,14 +32,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY eeg_watchdog.py .
 COPY autoclean_wrapper.sh .
 COPY autoclean_wrapper_test.sh .
+COPY autoclean_wrapper_minimal.sh .
 
 RUN dos2unix autoclean_wrapper.sh
 RUN dos2unix autoclean_wrapper_test.sh
+RUN dos2unix autoclean_wrapper_minimal.sh
 
 # Make the scripts executable
 RUN chmod +x autoclean_wrapper.sh
 RUN chmod +x autoclean_wrapper_test.sh
-
+RUN chmod +x autoclean_wrapper_minimal.sh
 # Create directories
 RUN mkdir -p /data/input /data/output /config /autoclean_pipeline
 

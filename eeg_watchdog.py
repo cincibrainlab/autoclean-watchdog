@@ -1,25 +1,17 @@
 """
-EEG Data Watchdog Monitor
+Minimal EEG Data Watchdog Monitor
 
-This script monitors a directory for new EEG data files and processes them using the
-autoclean pipeline with the specified parameters. It handles multiple files concurrently
-with a configurable maximum number of simultaneous processes.
-
-It tracks processed files in CSV tracking files to avoid reprocessing files on restart.
+Monitors a directory for new EEG data files and processes them with a specified script.
+Tracks processed files to avoid reprocessing.
 """
 
 import os
-import sys
 import time
 import argparse
 import subprocess
 import logging
-import shutil
-import threading
-import queue
 import csv
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -32,505 +24,231 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global file processing queue
-file_queue = queue.Queue()
-
-# Global tracking files
+# Tracking files
 SUCCESS_TRACKER = "processed_files.csv"
 ERROR_TRACKER = "error_files.csv"
 
-# Host path environment variables
-HOST_INPUT_DIR = os.environ.get('INPUT_DIR', '')
-HOST_OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '')
-HOST_CONFIG_DIR = os.environ.get('CONFIG_DIR', '')
-HOST_AUTOCLEAN_DIR = os.environ.get('AUTOCLEAN_DIR', '')
-
 class EEGFileHandler(FileSystemEventHandler):
-    def __init__(self, extensions, script_path, task, config_path, output_dir, work_dir, max_retries):
-        """
-        Initialize the EEG file handler.
-        
-        Args:
-            extensions (list): List of file extensions to monitor (EEG data file types)
-            script_path (str): Path to the autoclean script
-            task (str): EEG processing task type (RestingEyesOpen, ASSR, ChirpDefault, etc.)
-            config_path (str): Path to configuration YAML file
-            output_dir (str): Output directory for processed files
-            work_dir (str): Working directory for the autoclean pipeline
-            max_retries (int): Maximum number of retries for error files
-        """
+    def __init__(self, monitor_dir, extensions, script_path, task, config_path, output_dir, work_dir):
+        """Initialize the EEG file handler with minimal parameters."""
+        self.monitor_dir = monitor_dir
         self.extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in extensions]
         self.script_path = script_path
         self.task = task
         self.config_path = config_path
         self.output_dir = output_dir
         self.work_dir = work_dir
-        self.max_retries = max_retries
+        
+        # Setup tracking files
+        self.success_tracker_path = os.path.join(monitor_dir, SUCCESS_TRACKER)
+        self.error_tracker_path = os.path.join(monitor_dir, ERROR_TRACKER)
         
         # Load tracking data
-        self.success_files = load_success_tracking()
-        self.error_files = load_error_tracking()
+        self.processed_files = self._load_processed_files()
         
-        # Ensure the output directory exists
-        # Only create directories in the container if not using host paths
-        if not (HOST_INPUT_DIR and HOST_OUTPUT_DIR and HOST_CONFIG_DIR and HOST_AUTOCLEAN_DIR):
-            if not os.path.exists(self.output_dir):
-                os.makedirs(self.output_dir)
-                logger.info(f"Created output directory: {self.output_dir}")
-        else:
-            logger.info(f"Using host paths - skipping output directory creation in container")
+        # Ensure output directory exists
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            logger.info(f"Created output directory: {output_dir}")
+    
+    def _load_processed_files(self):
+        """Load list of previously processed files."""
+        processed = set()
+        
+        if os.path.exists(self.success_tracker_path):
+            try:
+                with open(self.success_tracker_path, 'r', newline='') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    for row in reader:
+                        if 'filename' in row:
+                            processed.add(row['filename'])
+            except Exception as e:
+                logger.error(f"Error reading success tracker: {e}")
+        
+        return processed
+    
+    def _record_success(self, file_path):
+        """Record successfully processed file."""
+        filename = os.path.basename(file_path)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        file_exists = os.path.exists(self.success_tracker_path)
+        
+        with open(self.success_tracker_path, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=['filename', 'timestamp', 'filepath'])
+            
+            if not file_exists:
+                writer.writeheader()
+            
+            writer.writerow({
+                'filename': filename,
+                'timestamp': timestamp,
+                'filepath': file_path
+            })
+        
+        logger.info(f"Recorded successful processing of {filename}")
+        self.processed_files.add(filename)
+    
+    def _record_error(self, file_path, error_message):
+        """Record file processing error."""
+        filename = os.path.basename(file_path)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        file_exists = os.path.exists(self.error_tracker_path)
+        
+        with open(self.error_tracker_path, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=['filename', 'timestamp', 'filepath', 'error'])
+            
+            if not file_exists:
+                writer.writeheader()
+            
+            writer.writerow({
+                'filename': filename,
+                'timestamp': timestamp,
+                'filepath': file_path,
+                'error': error_message[:200]  # Limit error message length
+            })
+        
+        logger.info(f"Recorded error for {filename}")
     
     def on_created(self, event):
         """Handle file creation events."""
         if not event.is_directory:
             file_path = event.src_path
-            file_ext = os.path.splitext(file_path)[1].lower()
-            
-            if file_ext in self.extensions:
+            if self._should_process(file_path):
                 logger.info(f"New EEG data file detected: {file_path}")
-                
-                # Check if the file should be processed
-                should_process, retry_count = self.should_process_file(file_path)
-                
-                if should_process:
-                    # Add the file to the processing queue with its processing parameters
-                    file_queue.put({
-                        'file_path': file_path,
-                        'script_path': self.script_path,
-                        'task': self.task,
-                        'config_path': self.config_path,
-                        'output_dir': self.output_dir,
-                        'work_dir': self.work_dir,
-                        'max_retries': self.max_retries,
-                        'retry_count': retry_count
-                    })
-                else:
-                    logger.info(f"Skipping already processed file: {file_path}")
+                self._process_file(file_path)
     
-    def should_process_file(self, file_path):
-        """
-        Determine if a file should be processed based on the tracking files.
+    def _should_process(self, file_path):
+        """Determine if a file should be processed."""
+        # Check if it has the right extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext not in self.extensions:
+            return False
         
-        Args:
-            file_path (str): Path to the file to check
-            
-        Returns:
-            tuple: (should_process, retry_count) - True if file should be processed and current retry count
-        """
-        # Get the filename portion for tracking
+        # Check if it's already been processed
         filename = os.path.basename(file_path)
+        if filename in self.processed_files:
+            logger.info(f"Skipping already processed file: {file_path}")
+            return False
         
-        # Check if this file has been successfully processed
-        if filename in self.success_files:
-            return False, 0
-        
-        # Check if this file has errors and has reached max retries
-        retry_count = 0
-        if filename in self.error_files:
-            retry_count = self.error_files[filename]
-            if retry_count >= self.max_retries:
-                logger.warning(f"File {filename} has reached max retries ({self.max_retries}). Skipping.")
-                return False, retry_count
-            
-            logger.info(f"Retrying file {filename} (attempt {retry_count + 1}/{self.max_retries})")
-        
-        return True, retry_count
-
-
-def load_success_tracking():
-    """
-    Load tracking data from the success CSV file.
-    
-    Returns:
-        set: Set of filenames that have been successfully processed
-    """
-    success_files = set()
-    
-    if os.path.exists(SUCCESS_TRACKER):
-        try:
-            with open(SUCCESS_TRACKER, 'r', newline='') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    if 'filename' in row:
-                        success_files.add(row['filename'])
-        except Exception as e:
-            logger.error(f"Error reading success tracker file: {e}")
-    
-    return success_files
-
-
-def load_error_tracking():
-    """
-    Load tracking data from the error CSV file.
-    
-    Returns:
-        dict: Dictionary of filenames to retry counts
-    """
-    error_files = {}
-    
-    if os.path.exists(ERROR_TRACKER):
-        try:
-            with open(ERROR_TRACKER, 'r', newline='') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    if 'filename' in row and 'retries' in row:
-                        try:
-                            error_files[row['filename']] = int(row['retries'])
-                        except ValueError:
-                            error_files[row['filename']] = 0
-        except Exception as e:
-            logger.error(f"Error reading error tracker file: {e}")
-    
-    return error_files
-
-
-def record_success(file_path):
-    """
-    Record a successfully processed file in the CSV tracker.
-    
-    Args:
-        file_path (str): Path to the successfully processed file
-    """
-    filename = os.path.basename(file_path)
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Create the file with headers if it doesn't exist
-    file_exists = os.path.exists(SUCCESS_TRACKER)
-    
-    with open(SUCCESS_TRACKER, 'a', newline='') as csvfile:
-        fieldnames = ['filename', 'timestamp', 'filepath']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        if not file_exists:
-            writer.writeheader()
-        
-        writer.writerow({
-            'filename': filename,
-            'timestamp': timestamp,
-            'filepath': file_path
-        })
-    
-    logger.info(f"Recorded successful processing of {filename}")
-    
-    # Remove from error tracking if present
-    remove_from_error_tracking(filename)
-
-
-def record_error(file_path, error_message, retry_count):
-    """
-    Record a file processing error in the CSV tracker.
-    
-    Args:
-        file_path (str): Path to the file that had a processing error
-        error_message (str): Error message to record
-        retry_count (int): Current retry count
-    """
-    filename = os.path.basename(file_path)
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Increment retry count
-    retry_count += 1
-    
-    # Create a new error tracking file
-    should_write_header = not os.path.exists(ERROR_TRACKER)
-    
-    # Get existing errors first (to avoid duplicate entries)
-    error_entries = []
-    error_files = {}
-    
-    if os.path.exists(ERROR_TRACKER):
-        try:
-            with open(ERROR_TRACKER, 'r', newline='') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    # Skip the file we're updating
-                    if row.get('filename') != filename:
-                        error_entries.append(row)
-                        if 'filename' in row and 'retries' in row:
-                            try:
-                                error_files[row['filename']] = int(row['retries'])
-                            except ValueError:
-                                error_files[row['filename']] = 0
-        except Exception as e:
-            logger.error(f"Error reading error tracker file: {e}")
-    
-    # Add/update the current file entry
-    with open(ERROR_TRACKER, 'w', newline='') as csvfile:
-        fieldnames = ['filename', 'timestamp', 'filepath', 'retries', 'error']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        if should_write_header:
-            writer.writeheader()
-        
-        # Write existing entries
-        for entry in error_entries:
-            writer.writerow(entry)
-        
-        # Write the new/updated entry
-        writer.writerow({
-            'filename': filename,
-            'timestamp': timestamp,
-            'filepath': file_path,
-            'retries': retry_count,
-            'error': error_message[:200]  # Limit error message length
-        })
-    
-    logger.info(f"Recorded error for {filename} (retry {retry_count})")
-
-
-def remove_from_error_tracking(filename):
-    """
-    Remove a file from the error tracking CSV when it's successfully processed.
-    
-    Args:
-        filename (str): Name of the file to remove
-    """
-    if not os.path.exists(ERROR_TRACKER):
-        return
-    
-    entries = []
-    
-    try:
-        with open(ERROR_TRACKER, 'r', newline='') as csvfile:
-            reader = csv.DictReader(csvfile)
-            fieldnames = reader.fieldnames
-            for row in reader:
-                if row.get('filename') != filename:
-                    entries.append(row)
-    
-        with open(ERROR_TRACKER, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            for entry in entries:
-                writer.writerow(entry)
-    except Exception as e:
-        logger.error(f"Error updating error tracking file: {e}")
-
-
-def process_file(params):
-    """
-    Process an EEG data file using the autoclean script.
-    
-    Args:
-        params (dict): Dictionary containing processing parameters
-    
-    Returns:
-        bool: True if processing was successful, False otherwise
-    """
-    file_path = params['file_path']
-    script_path = params['script_path']
-    task = params['task']
-    config_path = params['config_path']
-    output_dir = params['output_dir']
-    work_dir = params['work_dir']
-    retry_count = params.get('retry_count', 0)
-    
-    try:
-        # Make sure the script is executable
-        if not os.access(script_path, os.X_OK):
-            subprocess.run(['chmod', '+x', script_path], check=True)
-            logger.info(f"Made autoclean script executable: {script_path}")
-        
-        # Convert container paths to host paths for Docker-in-Docker
-        # Get the relative path from the container's input directory
-        if HOST_INPUT_DIR and file_path.startswith('/data/input/'):
-            rel_path = os.path.relpath(file_path, '/data/input')
-            # Use os.path.join to handle path separators correctly for the OS
-            host_file_path = os.path.join(HOST_INPUT_DIR, rel_path)
-            # Normalize path to use forward slashes for consistency
-            host_file_path = host_file_path.replace('\\', '/')
-            logger.info(f"Converted container input path {file_path} to host path {host_file_path}")
-        else:
-            host_file_path = file_path
-            logger.warning(f"Could not convert input path {file_path} to host path, using as is")
-        
-        # Set up environment variables for the script
-        env = os.environ.copy()
-        env['HOST_INPUT_DIR'] = HOST_INPUT_DIR
-        env['HOST_OUTPUT_DIR'] = HOST_OUTPUT_DIR
-        env['HOST_CONFIG_DIR'] = HOST_CONFIG_DIR
-        env['HOST_AUTOCLEAN_DIR'] = HOST_AUTOCLEAN_DIR
-        env['HOST_FILE_PATH'] = host_file_path
-        
-        # Add a flag to indicate we're using host paths
-        if HOST_INPUT_DIR and HOST_OUTPUT_DIR and HOST_CONFIG_DIR and HOST_AUTOCLEAN_DIR:
-            env['USING_HOST_PATHS'] = 'true'
-            logger.info("Setting USING_HOST_PATHS=true to indicate we're using host paths")
-        
-        # Run the autoclean script with the appropriate parameters
-        command = [
-            script_path,
-            "-DataPath", file_path,
-            "-Task", task,
-            "-ConfigPath", config_path,
-            "-OutputPath", output_dir,
-            "-WorkDir", work_dir
-        ]
-        
-        logger.info(f"Processing file: {file_path}")
-        logger.info(f"Host file path: {host_file_path}")
-        logger.info(f"Command: {' '.join(command)}")
-        
-        result = subprocess.run(
-            command,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env
-        )
-        
-        logger.info(f"EEG data processing completed successfully for: {file_path}")
-        logger.debug(f"Script output: {result.stdout}")
-        
-        # Record success
-        record_success(file_path)
         return True
-        
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error processing file {file_path}: {e}")
-        logger.error(f"Script stderr: {e.stderr}")
-        
-        # Record error
-        record_error(file_path, str(e.stderr), retry_count)
-        return False
-    except Exception as e:
-        logger.error(f"Unexpected error processing file {file_path}: {str(e)}")
-        
-        # Record error
-        record_error(file_path, str(e), retry_count)
-        return False
-
-
-def worker_thread(max_workers):
-    """
-    Worker thread that manages the ThreadPoolExecutor for processing files.
     
-    Args:
-        max_workers (int): Maximum number of concurrent processing tasks
-    """
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        while True:
-            try:
-                # Get file processing parameters from the queue
-                params = file_queue.get(block=True, timeout=1)
-                
-                # Submit the processing task to the thread pool
-                executor.submit(process_file, params)
-                
-                # Mark the task as done
-                file_queue.task_done()
-                
-            except queue.Empty:
-                # Queue is empty, continue waiting
-                continue
-            except Exception as e:
-                logger.error(f"Error in worker thread: {str(e)}")
-                # Mark the task as done even if there was an error
-                file_queue.task_done()
+    def process_existing_files(self):
+        """Process existing files in the monitored directory."""
+        logger.info(f"Checking for existing files in {self.monitor_dir}")
+        for file in os.listdir(self.monitor_dir):
+            file_path = os.path.join(self.monitor_dir, file)
+            if os.path.isfile(file_path) and self._should_process(file_path):
+                logger.info(f"Found existing EEG data file to process: {file_path}")
+                self._process_file(file_path)
+    
+    def _process_file(self, file_path):
+        """Process an EEG data file using the autoclean script."""
+        try:
+            # Make sure the script is executable
+            if not os.access(self.script_path, os.X_OK):
+                subprocess.run(['chmod', '+x', self.script_path], check=True)
+                logger.info(f"Made script executable: {self.script_path}")
+            
+            # Run the autoclean script
+            command = [
+                self.script_path,
+                "-DataPath", file_path,
+                "-Task", self.task,
+                "-ConfigPath", self.config_path,
+                "-OutputPath", self.output_dir,
+                "-WorkDir", self.work_dir
+            ]
+            
+            logger.info(f"Processing file: {file_path}")
+            logger.info(f"Command: {' '.join(command)}")
+            
+            # Pass along the original environment variables
+            result = subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=os.environ
+            )
+            
+            logger.info(f"EEG data processing completed successfully for: {file_path}")
+            self._record_success(file_path)
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error processing file {file_path}: {e}")
+            logger.error(f"Script stderr: {e.stderr}")
+            self._record_error(file_path, str(e.stderr))
+            
+        except Exception as e:
+            logger.error(f"Unexpected error processing file {file_path}: {str(e)}")
+            self._record_error(file_path, str(e))
 
 
 def main():
     """Main entry point of the script."""
-    parser = argparse.ArgumentParser(description='Monitor a directory for new EEG data files and process them with autoclean')
-    parser.add_argument('--dir', '-d', required=True, help='Directory to monitor for new EEG data files')
-    parser.add_argument('--extensions', '-e', required=True, nargs='+', help='EEG data file extensions to monitor (e.g., edf set vhdr)')
-    parser.add_argument('--script', '-s', required=True, help='Path to the autoclean script')
-    parser.add_argument('--task', '-t', required=True, help='EEG processing task type (RestingEyesOpen, ASSR, ChirpDefault, etc.)')
-    parser.add_argument('--config', '-c', required=True, help='Path to configuration YAML file')
-    parser.add_argument('--output', '-o', required=True, help='Output directory for processed files')
-    parser.add_argument('--work_dir', '-w', required=True, help='Working directory for the autoclean pipeline')
-    parser.add_argument('--max-workers', type=int, default=3, help='Maximum number of concurrent processing tasks (default: 3)')
-    parser.add_argument('--max-retries', type=int, default=3, help='Maximum number of retries for error files (default: 3)')
-    parser.add_argument('--reset-tracking', action='store_true', help='Reset the tracking files and reprocess all files')
+    parser = argparse.ArgumentParser(description='Minimal EEG data file monitor')
+    parser.add_argument('--dir', '-d', required=True, help='Directory to monitor')
+    parser.add_argument('--extensions', '-e', required=True, nargs='+', help='File extensions to monitor')
+    parser.add_argument('--script', '-s', required=True, help='Processing script path')
+    parser.add_argument('--task', '-t', required=True, help='EEG processing task type')
+    parser.add_argument('--config', '-c', required=True, help='Config file path')
+    parser.add_argument('--output', '-o', required=True, help='Output directory')
+    parser.add_argument('--work_dir', '-w', required=True, help='Working directory')
+    parser.add_argument('--reset-tracking', action='store_true', help='Reset tracking files')
     
     args = parser.parse_args()
     
-    # Log host path environment variables
-    logger.info(f"Host input directory: {HOST_INPUT_DIR}")
-    logger.info(f"Host output directory: {HOST_OUTPUT_DIR}")
-    logger.info(f"Host config directory: {HOST_CONFIG_DIR}")
-    logger.info(f"Host autoclean directory: {HOST_AUTOCLEAN_DIR}")
-    
-    # Set paths for tracking files (place them in the monitored directory)
-    global SUCCESS_TRACKER, ERROR_TRACKER
-    SUCCESS_TRACKER = os.path.join(args.dir, SUCCESS_TRACKER)
-    ERROR_TRACKER = os.path.join(args.dir, ERROR_TRACKER)
+    # Log environment variables for debugging
+    logger.info(f"INPUT_DIR: {os.environ.get('INPUT_DIR', '')}")
+    logger.info(f"OUTPUT_DIR: {os.environ.get('OUTPUT_DIR', '')}")
+    logger.info(f"CONFIG_DIR: {os.environ.get('CONFIG_DIR', '')}")
+    logger.info(f"AUTOCLEAN_DIR: {os.environ.get('AUTOCLEAN_DIR', '')}")
     
     # Reset tracking if requested
     if args.reset_tracking:
-        logger.info("Resetting tracking files as requested")
-        if os.path.exists(SUCCESS_TRACKER):
-            os.remove(SUCCESS_TRACKER)
-        if os.path.exists(ERROR_TRACKER):
-            os.remove(ERROR_TRACKER)
+        success_tracker = os.path.join(args.dir, SUCCESS_TRACKER)
+        error_tracker = os.path.join(args.dir, ERROR_TRACKER)
+        
+        if os.path.exists(success_tracker):
+            os.remove(success_tracker)
+            logger.info(f"Reset success tracker: {success_tracker}")
+            
+        if os.path.exists(error_tracker):
+            os.remove(error_tracker)
+            logger.info(f"Reset error tracker: {error_tracker}")
     
-    logger.info(f"Starting EEG data file monitoring in {args.dir}")
-    logger.info(f"Watching for files with extensions: {', '.join(args.extensions)}")
-    logger.info(f"Using autoclean script: {args.script}")
-    logger.info(f"Task: {args.task}")
-    logger.info(f"Config: {args.config}")
-    logger.info(f"Output directory: {args.output}")
-    logger.info(f"Working directory: {args.work_dir}")
-    logger.info(f"Maximum concurrent processes: {args.max_workers}")
-    logger.info(f"Maximum retries for error files: {args.max_retries}")
-    logger.info(f"Success tracker file: {SUCCESS_TRACKER}")
-    logger.info(f"Error tracker file: {ERROR_TRACKER}")
-    
-    # Start the worker thread for processing files
-    worker = threading.Thread(target=worker_thread, args=(args.max_workers,), daemon=True)
-    worker.start()
-    
-    # Initialize the event handler and observer
-    event_handler = EEGFileHandler(
-        args.extensions, 
-        args.script, 
-        args.task, 
-        args.config, 
-        args.output, 
-        args.work_dir,
-        args.max_retries
+    # Initialize the handler and observer
+    handler = EEGFileHandler(
+        args.dir,
+        args.extensions,
+        args.script,
+        args.task,
+        args.config,
+        args.output,
+        args.work_dir
     )
+    
     observer = Observer()
-    observer.schedule(event_handler, args.dir, recursive=True)
+    observer.schedule(handler, args.dir, recursive=True)
     observer.start()
     
+    logger.info(f"Started monitoring directory: {args.dir}")
+    logger.info(f"Watching for files with extensions: {', '.join(args.extensions)}")
+    
     try:
-        # Process existing files in the monitored directory
-        for file in os.listdir(args.dir):
-            file_path = os.path.join(args.dir, file)
-            if os.path.isfile(file_path):
-                file_ext = os.path.splitext(file_path)[1].lower()
-                if file_ext in event_handler.extensions:
-                    # Check if we should process this file
-                    should_process, retry_count = event_handler.should_process_file(file_path)
-                    if should_process:
-                        logger.info(f"Found existing EEG data file to process: {file_path}")
-                        file_queue.put({
-                            'file_path': file_path,
-                            'script_path': args.script,
-                            'task': args.task,
-                            'config_path': args.config,
-                            'output_dir': args.output,
-                            'work_dir': args.work_dir,
-                            'max_retries': args.max_retries,
-                            'retry_count': retry_count
-                        })
-                    else:
-                        logger.info(f"Skipping already processed file: {file_path}")
+        # Process existing files first
+        handler.process_existing_files()
         
-        # Keep the main thread alive
+        # Keep the script running
         while True:
             time.sleep(1)
             
     except KeyboardInterrupt:
-        logger.info("Stopping EEG data file monitoring")
+        logger.info("Stopping monitoring")
         observer.stop()
-        
-        # Wait for the file queue to be processed
-        logger.info("Waiting for remaining files to be processed...")
-        file_queue.join()
-        logger.info("All processing complete, exiting.")
         
     observer.join()
 
