@@ -19,7 +19,6 @@ services:
       - OUTPUT_DIR=${OUTPUT_DIR}
       - CONFIG_DIR=${CONFIG_DIR}
       - AUTOCLEAN_DIR=${AUTOCLEAN_DIR}
-      - AUTOCLEAN_IMAGE=${AUTOCLEAN_IMAGE:-autoclean:latest}  # Docker image name
     command: 
       - "--dir"
       - "/data/input"

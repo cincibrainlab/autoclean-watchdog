@@ -152,121 +152,84 @@ if [ -n "$HOST_INPUT_DIR" ] && [ -n "$HOST_OUTPUT_DIR" ] && [ -n "$HOST_CONFIG_D
         ls -la /autoclean_pipeline/
         exit 1
     fi
-    
-    # Create a temporary copy with Unix line endings
-    TEMP_SCRIPT="${JOB_DIR}/autoclean_unix.sh"
-    log "Creating temporary script with Unix line endings: $TEMP_SCRIPT"
-    
-    # Check if dos2unix is available
-    if command -v dos2unix &> /dev/null; then
-        log "Using dos2unix to convert line endings"
-        cp "$AUTOCLEAN_SCRIPT" "$TEMP_SCRIPT"
-        dos2unix "$TEMP_SCRIPT"
-    else
-        log "dos2unix not found, using sed to convert line endings"
-        # Use sed to convert CRLF to LF
-        sed 's/\r$//' "$AUTOCLEAN_SCRIPT" > "$TEMP_SCRIPT"
-    fi
+
+    # Convert the script to Unix format
+    dos2unix "$AUTOCLEAN_SCRIPT"
+    log "Converted autoclean script to Unix format"
     
     # Make sure the script is executable
-    chmod +x "$TEMP_SCRIPT"
-    log "Made temporary script executable"
-    
-    # Run the autoclean.sh script with the appropriate parameters
-    # This script will handle Docker container creation
-    log "Running autoclean.sh script with host paths"
+    chmod +x "$AUTOCLEAN_SCRIPT"
+    log "Made autoclean script executable"
     
     # Convert Windows paths to Unix format for the command
     HOST_FILE_PATH_UNIX=$(echo "$HOST_FILE_PATH" | sed 's/\\/\//g')
     HOST_CONFIG_DIR_UNIX=$(echo "$HOST_CONFIG_DIR" | sed 's/\\/\//g')
     HOST_JOB_DIR_UNIX=$(echo "$HOST_JOB_DIR" | sed 's/\\/\//g')
-    
+
+    # Append the config filename to the config directory path
+    HOST_CONFIG_PATH_UNIX="${HOST_CONFIG_DIR_UNIX}/autoclean_config.yaml"
+    log "Created config file path: $HOST_CONFIG_PATH_UNIX"
+
     log "Converted paths for command:"
     log "  File path: $HOST_FILE_PATH_UNIX"
     log "  Config dir: $HOST_CONFIG_DIR_UNIX"
+    log "  Config file path: $HOST_CONFIG_PATH_UNIX"
     log "  Job dir: $HOST_JOB_DIR_UNIX"
     
-    # Run the script
-    "$TEMP_SCRIPT" \
+    # Set environment variable to tell autoclean.sh to skip path validation for host paths
+    export AUTOCLEAN_SKIP_PATH_VALIDATION=1
+    log "Setting AUTOCLEAN_SKIP_PATH_VALIDATION=1 to skip path validation for host paths"
+    
+    # Check if docker is running
+    log "Checking Docker status:"
+    docker info > "${LOG_FILE}.docker_info" 2>&1 || log "WARNING: Docker may not be running properly"
+    
+    # Check if docker-compose.yml exists in the autoclean directory
+    log "Checking for docker-compose.yml in autoclean directory:"
+    if [ -f "/autoclean_pipeline/docker-compose.yml" ]; then
+        log "docker-compose.yml found in /autoclean_pipeline/"
+        log "Contents of docker-compose.yml:"
+        cat "/autoclean_pipeline/docker-compose.yml" >> "${LOG_FILE}" 2>&1
+    else
+        log "ERROR: docker-compose.yml not found in /autoclean_pipeline/"
+        log "Directory contents:"
+        ls -la "/autoclean_pipeline/" >> "${LOG_FILE}" 2>&1
+    fi
+    
+    # Run the script with output capture
+    log "Running autoclean.sh script with arguments:"
+    log "  -DataPath: $HOST_FILE_PATH_UNIX"
+    log "  -Task: $TASK"
+    log "  -ConfigPath: $HOST_CONFIG_PATH_UNIX"
+    log "  -OutputPath: $HOST_JOB_DIR_UNIX"
+    
+    # Capture both stdout and stderr
+    OUTPUT=$("$AUTOCLEAN_SCRIPT" \
         -DataPath "$HOST_FILE_PATH_UNIX" \
         -Task "$TASK" \
-        -ConfigPath "$HOST_CONFIG_DIR_UNIX" \
+        -ConfigPath "$HOST_CONFIG_PATH_UNIX" \
         -OutputPath "$HOST_JOB_DIR_UNIX" \
-        -Debug
+        -WorkDir "/autoclean_pipeline" \
+        -Debug 2>&1)
     
     # Save the exit code immediately
     EXIT_CODE=$?
     log "autoclean.sh script exit code: $EXIT_CODE"
     
-    # Clean up the temporary script
-    rm -f "$TEMP_SCRIPT"
-    log "Removed temporary script"
+    # Log the output
+    log "===== BEGIN autoclean.sh output ====="
+    echo "$OUTPUT" >> "${LOG_FILE}"
+    log "===== END autoclean.sh output ====="
 else
-    # Path to the autoclean.sh script
-    AUTOCLEAN_SCRIPT="${AUTOCLEAN_PATH}/autoclean.sh"
-    echo "DEBUG: AutoClean script path: $AUTOCLEAN_SCRIPT"
-
-    # Check if the script exists
-    if [ ! -f "$AUTOCLEAN_SCRIPT" ]; then
-        log "ERROR: autoclean.sh script not found at $AUTOCLEAN_SCRIPT"
-        log "Checking directory contents:"
-        ls -la "$AUTOCLEAN_PATH/"
-        exit 1
-    fi
-
-    # Create a temporary copy with Unix line endings
-    TEMP_SCRIPT="${JOB_DIR}/autoclean_unix.sh"
-    log "Creating temporary script with Unix line endings: $TEMP_SCRIPT"
-    
-    # Check if dos2unix is available
-    if command -v dos2unix &> /dev/null; then
-        log "Using dos2unix to convert line endings"
-        cp "$AUTOCLEAN_SCRIPT" "$TEMP_SCRIPT"
-        dos2unix "$TEMP_SCRIPT"
-    else
-        log "dos2unix not found, using sed to convert line endings"
-        # Use sed to convert CRLF to LF
-        sed 's/\r$//' "$AUTOCLEAN_SCRIPT" > "$TEMP_SCRIPT"
-    fi
-    
-    # Make sure the script is executable
-    chmod +x "$TEMP_SCRIPT"
-    log "Made temporary script executable"
-
-    # Extract config directory and filename
-    CONFIG_DIR=$(dirname "$CONFIG_PATH")
-    CONFIG_FILE=$(basename "$CONFIG_PATH")
-    HOST_CONFIG_PATH=$(dirname "$HOST_CONFIG_PATH")
-    echo "DEBUG: Config directory: $CONFIG_DIR, Config filename: $CONFIG_FILE"
-
-    # Update CONFIG_PATH to only use the directory
-    CONFIG_PATH="$CONFIG_DIR"
-    echo "DEBUG: Updated CONFIG_PATH to directory only: $CONFIG_PATH"
-
-    # Run autoclean.sh with the job directory as the output path
-    # This ensures each processing job has its own isolated output directory
-    log "Running autoclean.sh with output path: $JOB_DIR"
-    echo "DEBUG: Full command: $TEMP_SCRIPT -DataPath \"$DATA_PATH\" -Task \"$TASK\" -ConfigPath \"$HOST_CONFIG_PATH\" -OutputPath \"$JOB_DIR\" -WorkDir \"$AUTOCLEAN_PATH\""
-
-    # Run with output redirected to log file but also capture to a variable for debugging
-    OUTPUT=$($TEMP_SCRIPT \
-        -DataPath "$DATA_PATH" \
-        -Task "$TASK" \
-        -ConfigPath "$HOST_CONFIG_PATH" \
-        -OutputPath "$JOB_DIR" \
-        -WorkDir "$AUTOCLEAN_PATH" 2>&1)
-
-    # Save the exit code immediately
-    EXIT_CODE=$?
-    echo "DEBUG: AutoClean exit code: $EXIT_CODE"
-    echo "DEBUG: AutoClean output: $OUTPUT"
-
-    # Also write the output to the log file
-    echo "$OUTPUT" >> "$LOG_FILE"
-    
-    # Clean up the temporary script
-    rm -f "$TEMP_SCRIPT"
-    log "Removed temporary script"
+    # Error: Host paths are required
+    log "ERROR: Host path environment variables are not set. This script requires Docker-in-Docker functionality."
+    log "Please ensure the following environment variables are set:"
+    log "  - HOST_INPUT_DIR"
+    log "  - HOST_OUTPUT_DIR"
+    log "  - HOST_CONFIG_DIR"
+    log "  - HOST_AUTOCLEAN_DIR"
+    log "  - HOST_FILE_PATH"
+    exit 1
 fi
 
 # Check the exit status
