@@ -12,6 +12,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
     environment:
       - TZ=UTC
+      - BOT_NAME=${BOT_NAME}  # Pass BOT_NAME into container
       - TASK_NAME=${TASK_NAME}  # Pass task name into container
       - MAX_WORKERS=${MAX_WORKERS:-3}  # Define here instead of command
       # Pass host paths for Docker-in-Docker

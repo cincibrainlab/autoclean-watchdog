@@ -31,19 +31,38 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY eeg_watchdog.py .
 COPY autoclean_wrapper.sh .
+COPY review_wrapper.sh .
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+# Export environment variables for review_wrapper.sh\n\
+export OUTPUT_PATH=${OUTPUT_DIR:-/data/output}\n\
+export BOT_NAME=${BOT_NAME:-default}\n\
+\n\
+# Run review_wrapper.sh in the background\n\
+bash /app/review_wrapper.sh &\n\
+\n\
+# Run the main application with passed arguments\n\
+exec python eeg_watchdog.py "$@"\n\
+' > /app/entrypoint.sh
 
 RUN dos2unix autoclean_wrapper.sh
+RUN dos2unix review_wrapper.sh
+RUN dos2unix /app/entrypoint.sh
 
 # Make the scripts executable
 RUN chmod +x autoclean_wrapper.sh
+RUN chmod +x review_wrapper.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Create directories
 RUN mkdir -p /data/input /data/output /config /autoclean_pipeline
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Command to run the application
-ENTRYPOINT ["python", "eeg_watchdog.py"]
+# Use the new entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Default arguments (can be overridden at runtime)
 CMD ["--dir", "/data/input", "--extensions", "edf", "set", "vhdr", "bdf", "--script", "/app/autoclean_wrapper.sh", "--task", "RestingEyesOpen", "--config", "/config/autoclean_config.yaml", "--output", "/data/output", "--max-workers", "3"]
