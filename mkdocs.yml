@@ -1,0 +1,7 @@
+site_name: EEG Data Processing Watchdog
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - System Architecture: images/system-architecture.svg
+docs_dir: docs
